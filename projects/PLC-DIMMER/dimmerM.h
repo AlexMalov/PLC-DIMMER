@@ -21,13 +21,11 @@ class DimmerM
     DimmerM(uint8_t pin1, uint8_t index);
     uint8_t pin;              // pin Диммера
     uint8_t triakTime;        // мощность переведенная во время закрытия семистора
-    uint8_t defPower;         // значение мощности после включения
     void setOn();
     void setOff();
     void setPower(uint8_t power);
     void setRampTime(uint16_t rampTime); // ramtTime в секундах
     void zeroCross();
-    void save2EEPROM();
     void loadEEPROM();
     uint8_t getRampTime();
     uint8_t getPower();

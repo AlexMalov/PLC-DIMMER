@@ -20,17 +20,11 @@ GButton myBtns[btnsAmount] = {GButton(A0), GButton(A1), GButton(A2), GButton(A3)
 
 void setup() {
   pinMode(zeroDetectorPin, INPUT_PULLUP);
+  loadDimmersEEPROM();
   attachInterrupt(digitalPinToInterrupt(zeroDetectorPin), handleInt0, FALLING);    //pin 2 int0
   Timer2.enableISR();
   Timer2.setPeriod(zeroPeriod1);
-  //myOLED.begin();                             // запускаем дисплей
   Serial.begin(115200);
-  loadDimmersEEPROM();
-  //myOLED.clrScr();                                          //Очищаем буфер дисплея.
-  //myOLED.setFont(MicroFont);                                //Перед выводом текста необходимо выбрать шрифт
-  //myOLED.rotateDisplay(1);
-  //myOLED.print(F("HELLO, MY FRIEND!"), 0, 0);
-  //myOLED.print(F("\115\105\130\101\124\120\117\110\40\104\111\131"), 0, 4);
 
   // start the Ethernet connection:
   const byte mac[] = { 0x90, 0xB2, 0xFA, 0x0D, 0x4E, 0x59 };  // Установить MAC адресс для этой Arduino (должен быть уникальным в вашей сети)
@@ -52,15 +46,8 @@ void setup() {
       Ethernet.begin(mac, ip, myDns, gateway, subnet);
     }
   }
-  //myOLED.print(F("IP:"), 0, 2);
-  //uint32_t ip1 = Ethernet.localIP();
-  //myOLED.print(ip1 & 0xff, 4*6, 2); myOLED.print(F("."), 7*6, 2);
-  //myOLED.print((ip1>>24) & 0xff, 8*6, 2); myOLED.print(F("."), 11*6, 2);
-  //myOLED.print((ip1>>16) & 0xff, 12*6, 2); myOLED.print(F("."), 15*6, 2);
-  //myOLED.print((ip1>>24) & 0xff, 16*6, 2);
   Serial.print(F("My ip addr: "));
   Serial.println(Ethernet.localIP());
-  
 }
 
 unsigned long endTm1 = 100;

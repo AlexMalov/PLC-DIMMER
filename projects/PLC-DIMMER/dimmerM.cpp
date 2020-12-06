@@ -2,7 +2,7 @@
 #include <EEPROM.h>
 
 const PROGMEM uint8_t power2time[] = {
-     0,    0,  0,  11,  13,  14,  16,  17,  18,  19,
+     0,    0,  0,  0,  13,  14,  16,  17,  18,  19,
      20,  22, 23,  23,  24,  25,  26,  27,  28,  29,
      29,  30, 31,  32,  32,  33,  34,  35,  35,  36,
      37,  37, 38,  39,  39,  40,  41,  41,  42,  43,
@@ -18,21 +18,17 @@ const PROGMEM uint8_t power2time[] = {
 DimmerM::DimmerM(uint8_t pin1, uint8_t index) {
   _index = index; 
   pin = pin1;
-  digitalWrite(pin, LOW);
   pinMode(pin, OUTPUT);
-  defPower = 30;
   _power = 0;
   setRampTime(2);
-  //setOn();
 }
 
 void DimmerM::setPower(uint8_t power){
   _newPower = constrain( power, 0, 100);
-  if (_newPower) defPower = _newPower;
   _rampCounter = 0;
   _rampStartPower = _power;
-  triakTime = pgm_read_byte(&power2time[_power]);
-  save2EEPROM();
+  EEPROM.update(_index*2, _newPower);
+  EEPROM.update(0, 18);
 }
     
 void DimmerM::setRampTime(uint16_t rampTime){
@@ -45,23 +41,16 @@ uint8_t DimmerM::getRampTime(){
 }
 
 void DimmerM::zeroCross(){
-  if (_rampCycles) _power = (_rampStartPower + ((int32_t) _newPower - _rampStartPower) * _rampCounter / _rampCycles) & _isOn;
-    else _power = 0;
+  digitalWrite(pin, LOW);
+  _power = _rampStartPower + ((int32_t) (_newPower & _isOn) - _rampStartPower) * _rampCounter / _rampCycles;
   triakTime = pgm_read_byte(&power2time[_power]);
   if (_rampCounter < _rampCycles ) _rampCounter++;
 }
 
-void DimmerM::save2EEPROM(){
-  EEPROM.update(_index*2, _newPower);
-  EEPROM.update(_index*2+1, _isOn);
-  EEPROM.update(0, 18);  
-}
-
 void DimmerM::loadEEPROM(){
+  if (EEPROM[0] != 18) return;  // в EEPROM ничего еще не сохраняли
   setPower(EEPROM[_index*2]);
   _isOn =  EEPROM[_index*2+1];
-//  if (EEPROM[_index*2+1]) setOn(); 
-//    else setOff();
 }
 
 uint8_t DimmerM::getPower(){
@@ -70,11 +59,16 @@ uint8_t DimmerM::getPower(){
 
 void DimmerM::setOn(){
   _isOn = 0xff;
-  //setPower(defPower);
+  _rampCounter = 0;
+  _rampStartPower = _power;
+  EEPROM.update(_index*2+1, _isOn);
+  EEPROM.update(0, 18);
 }
 
 void DimmerM::setOff(){
   _isOn = 0;
-  //defPower = _newPower;
-  //setPower(0);
+  _rampCounter = 0;
+  _rampStartPower = _power;
+  EEPROM.update(_index*2+1, _isOn);
+  EEPROM.update(0, 18);
 }
