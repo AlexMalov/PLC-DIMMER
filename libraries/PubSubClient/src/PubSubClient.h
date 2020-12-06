@@ -23,7 +23,7 @@
 
 // MQTT_MAX_PACKET_SIZE : Maximum packet size. Override with setBufferSize().
 #ifndef MQTT_MAX_PACKET_SIZE
-#define MQTT_MAX_PACKET_SIZE 50
+#define MQTT_MAX_PACKET_SIZE 90
 #endif
 
 // MQTT_KEEPALIVE : keepAlive interval in Seconds. Override with setKeepAlive()
