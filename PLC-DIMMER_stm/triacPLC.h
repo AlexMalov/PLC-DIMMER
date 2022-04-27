@@ -14,11 +14,12 @@
 #define def_mqtt_pass "mqtt"
 #define def_mqtt_clientID "plc1Traic"
 #define def_HomeAssistantDiscovery "HomeAssistant"
+#define def_HABirthTopic "homeassistant/status"
 #define def_mqtt_brokerIP 192,168,0,124   // IP адресс MQTT брокера по умочанию
 
 #include "Arduino.h"
-#include <GyverButton.h>
 #include "dimmerM.h"
+#include "MqttBtn.h"
 
 #include <EthernetENC.h>
 #include <PubSubClient.h>
@@ -44,16 +45,18 @@ struct mqtt_cfg_t {
   char User[21];
   char Pass[9];
   char ClientID[21];
-  char HADiscover[14];  // "HomeAssistant"
+  char HADiscover[14];    // "HomeAssistant"
   uint8_t SrvIP[4];        
-  uint16_t SrvPort;            //1883
+  uint16_t SrvPort;       //1883
+  char HABirthTopic[21];  // "homeassistant/status"
+  bool isHAonline = false;       // curent HA online status 
 };
 
 class triacPLC
 {
   private:
     DimmerM _dimmers[channelAmount] = {DimmerM(PA1,1), DimmerM(PA2,2), DimmerM(PA3,3), DimmerM(PA4,4), DimmerM(PA5,5), DimmerM(PA6,6), DimmerM(PA7,7), DimmerM(PB0,8), DimmerM(PB1,9)};
-    GButton _btns[btnsAmount] = {GButton(PB9), GButton(PA11), GButton(PA10), GButton(PA9), GButton(PA8), GButton(PB15), GButton(PB14), GButton(PB13), GButton(PB12)};  // кнопки входов PLC
+    MqttBtn _btns[btnsAmount] = {MqttBtn(PB9,1), MqttBtn(PA11,2), MqttBtn(PA10,3), MqttBtn(PA9,4), MqttBtn(PA8,5), MqttBtn(PB15,6), MqttBtn(PB14,7), MqttBtn(PB13,8), MqttBtn(PB12,9)};  // кнопки входов PLC
     volatile uint8_t _counter;                                                     // счётчик цикла диммирования
     volatile uint8_t _zeroCrossCntr = 10; 
     volatile uint32_t _zeroCrossTime;    
@@ -67,6 +70,8 @@ class triacPLC
     inet_cfg_t inet_cfg;
     mqtt_cfg_t mqtt_cfg;
     volatile int16_t ACfreq = 0;
+    bool flipDisplay = false;                                                 // переворачивать дисплей
+    void rtDisplay();                                                         // переворачивает дисплей
     bool begin(MQTT_CALLBACK_SIGNATURE = NULL);                               //инициализация дисплея и сетевой карты
     void mqttCallback(char* topic, byte* payload, uint16_t length);
     bool processEvents();
@@ -90,7 +95,6 @@ class triacPLC
     bool getBtnState(uint8_t btn_idx);
     bool getOnOff(uint8_t channel);
     void set_useMQTT(bool new_useMQTT);
-    //void buzzCmd(WebServer &server, WebServer::ConnectionType type, char *url_tail, bool tail_complete);
 };
 
 #endif

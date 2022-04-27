@@ -1,6 +1,5 @@
-//const char* mqtt_willTopic = "Dimmer/availability"; // Настройки LWT топика для отображения статуса диммера
-//const char* mqtt_payloadAvailable = "Online";
-//const char* mqtt_payloaNotdAvailable = "Offline";
+const char* mqtt_payloadAvailable = "online";
+const char* mqtt_payloadNotAvailable = "offline";
 
 #define changeLightSpeed 40       // 40 - соответствует 4 секундам. Для регулирования яркости ламп при удержании
 #define LinkCheckPeriod 1000        // период проверки подключения к сети
@@ -21,6 +20,13 @@ triacPLC::triacPLC(){
   loadEEPROM();
 }
 
+void triacPLC::rtDisplay(){
+  __HAL_RCC_I2C1_CLK_ENABLE();
+  plcOLED.flipV(flipDisplay);   // вращаем дисплей если надо
+  plcOLED.flipH(flipDisplay);
+  __HAL_RCC_I2C1_CLK_DISABLE();  
+}
+
 bool triacPLC::begin(MQTT_CALLBACK_SIGNATURE){         //инициализация дисплея и сетевой карты
   bool res = true;
   pinF1_DisconnectDebug(PB_3);  // disable Serial wire JTAG configuration
@@ -29,15 +35,11 @@ bool triacPLC::begin(MQTT_CALLBACK_SIGNATURE){         //инициализац�
   SPI.setMOSI(PB5);             // переносим SPI1 на альтернаывные пины
   SPI.setMISO(PB4);
   SPI.setSCLK(PB3);
- // loadEEPROM();
- // if (callback != NULL)_useMQTT = true;
- //   else _useMQTT = false;
   delay(45);                    // ждем дисплей 
   plcOLED.init();               //инициализируем дисплей  myOLED.begin();
   plcOLED.clear();              //Очищаем буфер дисплея.
-  display();
-  // myOLED.rotateDisplay(true);
-  plcOLED.print(F("PLC I0T 7-CH DIMMER"));
+  rtDisplay();                  // усанавливаем ориентацию дисплея
+  plcOLED.print(F("PLC I0T 9-CH DIMMER"));
   plcOLED.setCursorXY(0, 56);
   plcOLED.print(F("\115\105\130\101\124\120\117\110\40\104\111\131"));
   display();
@@ -76,7 +78,6 @@ bool triacPLC::begin(MQTT_CALLBACK_SIGNATURE){         //инициализац�
     #ifdef DEBUGPLC 
       Serial.println(F("No Eth Card")); 
     #endif
-    //_useMQTT = false;
     res = false;
   } else {
     plcOLED.print(F("OK"));
@@ -99,13 +100,14 @@ bool triacPLC::begin(MQTT_CALLBACK_SIGNATURE){         //инициализац�
     mqttClient.setServer(mqttBrokerIP, mqtt_cfg.SrvPort);
     mqttClient.setCallback(callback);
     char HA_autoDiscovery[40];
+
+    //-----=== Dimmmers ===----------
     strcpy(HA_autoDiscovery, mqtt_cfg.HADiscover);
     strcat(HA_autoDiscovery, "/light/");
     strcat(HA_autoDiscovery, mqtt_cfg.ClientID);    // "HomeAssistant/light/plc1Traic";
 
   //  String st1 = HomeAssistantDiscovery;
   //  st1 += "/light/" + plcName;
-    String st2;
     for (byte i = 1; i <= channelAmount; i++) {
       _dimmers[i-1].useMQTT = true;
       char tmp_str[65];
@@ -121,16 +123,38 @@ bool triacPLC::begin(MQTT_CALLBACK_SIGNATURE){         //инициализац�
       _dimmers[i-1].mqtt_topic_bri_state = new char[strlen(tmp_str)+1];
       strcpy(_dimmers[i-1].mqtt_topic_bri_state, tmp_str);
     }
+
+    //-----=== Buttons ===----------
+    strcpy(HA_autoDiscovery, mqtt_cfg.HADiscover);
+    strcat(HA_autoDiscovery, "/switch/");           //button
+    strcat(HA_autoDiscovery, mqtt_cfg.ClientID);    // "HomeAssistant/switch/plc1Traic";
+
+    for (byte i = 1; i <= btnsAmount; i++) {
+      _btns[i-1].useMQTT = true;
+      char tmp_str[65];
+      strcpy(tmp_str, HA_autoDiscovery); 
+      char num[3]; itoa(i, num, DEC);
+      strcat(tmp_str, num);              // "HomeAssistant/switch/plc1Traic1..9"; 
+      strcat(tmp_str, "/state");        // "HomeAssistant/switch/plc1Traic1..9/state"; 
+      _btns[i-1].mqtt_topic_state = new char[strlen(tmp_str) + 1];
+      strcpy(_btns[i-1].mqtt_topic_state, tmp_str);
+    }
   }
   _zeroCrossTime = millis();
   pinMode(zeroDetectorPin, INPUT_PULLUP);
   IWatchdog.begin(10000000);                          // wathDog 10 sec
+  mqtt_cfg.isHAonline = false;
   return res;
 }
 
 bool triacPLC::_haDiscover(){
   if (!mqttClient.connected()) return false;
-  StaticJsonDocument<256> JsonDoc;
+  char tmp_str1[40];
+  strcpy(tmp_str1, mqtt_cfg.HADiscover);
+  strcat(tmp_str1, "/");
+  strcat(tmp_str1, mqtt_cfg.ClientID);
+  strcat(tmp_str1, "/avty");                    // "HomeAssistant/plc1Traic/avty"
+ { StaticJsonDocument<256> JsonDoc;
   JsonDoc["cmd_t"] = "~/set";
   JsonDoc["stat_t"] = "~/state";
   JsonDoc["bri_cmd_t"] = "~/bri_cmd";
@@ -138,7 +162,9 @@ bool triacPLC::_haDiscover(){
   JsonDoc["bri_scl"] = 100;
   JsonDoc["pl_off"] = "0";
   JsonDoc["pl_on"] = "1";
-  JsonDoc["retain"] = true;
+  JsonDoc["ret"] = true;   //retain
+  JsonDoc["avty_t"] = tmp_str1;                 
+
   for (uint8_t i = 1; i <= channelAmount; i++){
     if (_dimmers[i-1].mqttRegistered) continue;
     char HA_autoDiscovery[40];
@@ -152,12 +178,12 @@ bool triacPLC::_haDiscover(){
     char tmp_str[65];
     strcpy(tmp_str, mqtt_cfg.ClientID);
     strcat(tmp_str, num);
-    JsonDoc["unique_id"] = tmp_str;// plcName + i;
-    JsonDoc["name"] = tmp_str;// plcName + i;
+    JsonDoc["unique_id"] = tmp_str;             // plcName + i;
+    JsonDoc["name"] = tmp_str;                  // plcName + i;
     strcpy(tmp_str, HA_autoDiscovery); 
-    strcat(tmp_str, "/config");        // "HomeAssistant/light/plc1Traic1..9/config"; 
+    strcat(tmp_str, "/config");                 // "HomeAssistant/light/plc1Traic1..9/config"; 
     
-    mqttClient.beginPublish(tmp_str, measureJson(JsonDoc), false);
+    mqttClient.beginPublish(tmp_str, measureJson(JsonDoc), true);
     serializeJson(JsonDoc, mqttClient);
     _dimmers[i-1].mqttRegistered = mqttClient.endPublish();
     strcpy(tmp_str, HA_autoDiscovery);
@@ -167,7 +193,45 @@ bool triacPLC::_haDiscover(){
     strcpy(tmp_str, HA_autoDiscovery);
     strcat(tmp_str, "/bri_cmd");                  // "HomeAssistant/light/plc1Traic1..9/bri_cmd"; 
     mqttClient.subscribe(tmp_str);
-    break;   
+    return true;   
+  }
+ }
+  
+  StaticJsonDocument<256> JsonDocBtn;
+  JsonDocBtn["cmd_t"] = "~/set";
+  JsonDocBtn["stat_t"] = "~/state";
+  JsonDocBtn["pl_off"] = "0";
+  JsonDocBtn["pl_on"] = "1";
+  JsonDocBtn["stat_off"] = "0";
+  JsonDocBtn["stat_on"] = "1";
+  JsonDocBtn["ret"] = true;      //retain
+  JsonDocBtn["avty_t"] = tmp_str1;                 
+
+  for (uint8_t i = 1; i <= channelAmount; i++){
+    if (_btns[i-1].mqttRegistered) continue;
+    char HA_autoDiscovery[40];
+    strcpy(HA_autoDiscovery, mqtt_cfg.HADiscover);
+    strcat(HA_autoDiscovery, "/switch/");
+    strcat(HA_autoDiscovery, mqtt_cfg.ClientID);
+    char num[3]; itoa(i, num, DEC);
+    strcat(HA_autoDiscovery, num);              // "HomeAssistant/switch/plc1Traic1..9"; 
+
+    JsonDocBtn["~"] = HA_autoDiscovery;            //"ha/switch/" + plcName + i;
+    char tmp_str[65];
+    strcpy(tmp_str, mqtt_cfg.ClientID);
+    strcat(tmp_str, num);
+    JsonDocBtn["unique_id"] = tmp_str;// plcName + i;
+    JsonDocBtn["name"] = tmp_str;// plcName + i;
+    strcpy(tmp_str, HA_autoDiscovery); 
+    strcat(tmp_str, "/config");        // "HomeAssistant/switch/plc1Traic1..9/config"; 
+    
+    mqttClient.beginPublish(tmp_str, measureJson(JsonDocBtn), true);
+    serializeJson(JsonDocBtn, mqttClient);
+    _btns[i-1].mqttRegistered = mqttClient.endPublish();
+    strcpy(tmp_str, HA_autoDiscovery);
+    strcat(tmp_str, "/set");                  // "HomeAssistant/light/plc1Traic1..9/set"; 
+    mqttClient.subscribe(tmp_str);
+    return true;   
   }
   return true;
 }
@@ -178,17 +242,22 @@ bool triacPLC::_mqttReconnect() {
   #endif
   plcOLED.setCursorXY(0, 40);
   plcOLED.print("MQTT CONNECT.."); 
-  //if (client.connect(clientID, mqtt_username, mqtt_password, mqtt_willTopic, 0, true, mqtt_payloaNotdAvailable, true)) {
-  if (mqttClient.connect(mqtt_cfg.ClientID, mqtt_cfg.User, mqtt_cfg.Pass)){ 
+  char mqtt_willTopic[40];
+  strcpy(mqtt_willTopic, mqtt_cfg.HADiscover);
+  strcat(mqtt_willTopic, "/");
+  strcat(mqtt_willTopic, mqtt_cfg.ClientID);
+  strcat(mqtt_willTopic, "/avty");                    // "HomeAssistant/plc1Traic/avty"
+
+  if (mqttClient.connect(mqtt_cfg.ClientID, mqtt_cfg.User, mqtt_cfg.Pass, mqtt_willTopic, 0, true, mqtt_payloadNotAvailable, true)){ 
     plcOLED.print(F("OK  "));
-   // client.publish (mqtt_willTopic, mqtt_payloadAvailable, true) ;      
-//    mqttClient.subscribe(mqtt_Dimmer0); //Serial.print(F("Connected to: ")); Serial.println(mqtt_Dimmer0);
+    mqttClient.publish(mqtt_willTopic, mqtt_payloadAvailable, true);      // топик статуса нашего контроллера
+    mqttClient.loop();
+    Ethernet.maintain();
+    mqttClient.loop();
+    mqttClient.subscribe(mqtt_cfg.HABirthTopic);                          // подписываемся на топик статуса HA
     #ifdef DEBUGPLC 
       Serial.println(F("OK")); 
     #endif
-    //char* st = "{\"~\": \"ha/light/PLC2\",\r\"unique_id\": \"litPLC2\",\r\"cmd_t\": \"~/set\",\r\"stat_t\": \"~/state\",\r\"bri_cmd_t\": \"~/bri_cmd\",\r\"bri_stat_t\": \"~/bri_state\",\r\"bri_scl\": 100,\r\"pl_off\": \"0\",\r\"pl_on\": \"1\"}";
-    //msgLen = strlen(st);
-    //mqttClient.publish(mqtt_autoDiscovery, st);
   } else {
     plcOLED.print(F("FAIL")); 
     #ifdef DEBUGPLC 
@@ -203,14 +272,17 @@ bool triacPLC::_doMqtt(){
   static uint32_t nextReconnectAttempt = MqttReconnectPeriod/2;
   if (Ethernet.linkStatus() != LinkON) {
     plcOLED.setCursorXY(0, 40);
-    plcOLED.print(F("MQTT CONNECT.. FAIL")); 
+    plcOLED.print(F("MQTT CONNECT.. FAIL"));
+    mqtt_cfg.isHAonline = mqttClient.connected();
     return false;
   }
   bool res = mqttClient.connected();
   if (!res) {
     if (millis() > nextReconnectAttempt) {
       nextReconnectAttempt = millis() + MqttReconnectPeriod;
-    for (uint8_t i = 1; i <= channelAmount; i++) _dimmers[i-1].mqttRegistered = false;
+      for (uint8_t i = 1; i <= channelAmount; i++) _dimmers[i-1].mqttRegistered = false;
+      for (uint8_t i = 1; i <= btnsAmount; i++) _btns[i-1].mqttRegistered = false;
+      mqtt_cfg.isHAonline = false;
       _mqttReconnect();    // Attempt to reconnect
     }
   } else {
@@ -222,7 +294,6 @@ bool triacPLC::_doMqtt(){
 }
 
 bool triacPLC::_doEthernet(){
-  //if (!mqtt_cfg.useMQTT) return true;
   static uint32_t nextLinkCheck = LinkCheckPeriod;
   if (millis() < nextLinkCheck) return true;
   nextLinkCheck = millis() + LinkCheckPeriod;
@@ -276,27 +347,57 @@ bool triacPLC::_doEthernet(){
 
 void triacPLC::mqttCallback(char* topic, byte* payload, uint16_t length) {
  // ha/light/plc1Traic1/set
-  char *uk1, *uk2, stemp[4];//, pl1[4];
+ // ha/switch/plc1Traic1/set
+  char *uk1, *uk2, stemp[4];
   char *pl1 = new char[length+1];
   strncpy(pl1, (char*)payload, length);
   pl1[length] = '\0';
-  uk1 = strstr(topic, mqtt_cfg.ClientID);
-  uk1 += strlen(mqtt_cfg.ClientID);
-  uk2 = strchr(uk1,'/');
-  uint8_t num = uk2-uk1; 
-  strncpy(stemp, uk1, num);
-  stemp[num] = 0;
-  num = atoi(stemp);
-  if (num > 9) return;      // ошика
-  uk2++;
-  if (strcmp(uk2, "bri_cmd") == 0)
-    setPower(num-1, atoi((char*)pl1));
-  if (strcmp(uk2, "set") == 0) {
-     if (atoi((char*)pl1)) _dimmers[num-1].setOn();
-       else _dimmers[num-1].setOff();
-     itoa(_dimmers[num-1].getOnOff(), stemp, DEC);
-     mqttClient.publish(_dimmers[num-1].mqtt_topic_state, stemp, true);
+  uk1 = strstr(topic, "light");                                               // light/plc1Traic1/set
+  if (uk1 == topic + strlen(mqtt_cfg.HADiscover) + 1 ) {
+    uk1 += strlen("light") + 1 ;                                              // plc1Traic1/set
+    uk1 = strstr(uk1, mqtt_cfg.ClientID);
+    if ( uk1 == NULL) return;
+    uk1 += strlen(mqtt_cfg.ClientID);
+    uk2 = strchr(uk1,'/');
+    uint8_t num = uk2-uk1; 
+    strncpy(stemp, uk1, num);
+    stemp[num] = 0;
+    num = atoi(stemp);
+    if (num > 9) return;      // ошика
+    uk2++;
+    if (strcmp(uk2, "bri_cmd") == 0)
+      setPower(num-1, atoi((char*)pl1));
+    if (strcmp(uk2, "set") == 0) {
+      if (atoi((char*)pl1)) _dimmers[num-1].setOn();
+        else _dimmers[num-1].setOff();
+      itoa(_dimmers[num-1].getOnOff(), stemp, DEC);
+      mqttClient.publish(_dimmers[num-1].mqtt_topic_state, stemp, true);
+    }
   }
+  uk1 = strstr(topic, "switch");                                               // switch/plc1Traic1/set 
+  if (uk1 == topic + strlen(mqtt_cfg.HADiscover) + 1 ) {
+    uk1 += strlen("switch") + 1 ;                                              // plc1Traic1/set
+    uk1 = strstr(uk1, mqtt_cfg.ClientID);
+    if ( uk1 == NULL) return;
+    uk1 += strlen(mqtt_cfg.ClientID);
+    uk2 = strchr(uk1,'/');
+    uint8_t num = uk2-uk1; 
+    strncpy(stemp, uk1, num);
+    stemp[num] = 0;
+    num = atoi(stemp);
+    if (num > 9) return;      // ошика
+    uk2++;
+    if (strcmp(uk2, "set") == 0) {
+      if (atoi((char*)pl1)) _btns[num-1].setOn();
+        else _btns[num-1].setOff();
+      itoa(_btns[num-1].getOnOff(), stemp, DEC);
+      mqttClient.publish(_btns[num-1].mqtt_topic_state, stemp, true);
+    }
+  }
+  if (strcmp(topic, mqtt_cfg.HABirthTopic) == 0) {                              // "homeassistant/status"
+    if (strcmp(pl1, mqtt_payloadAvailable) == 0) mqtt_cfg.isHAonline = true;
+      else mqtt_cfg.isHAonline = false;
+  }  
   delete [] pl1;
 }
 
@@ -306,19 +407,19 @@ void triacPLC::_doButtonsDimmers(){
   char st[4];
    //двойной клик
   for (byte i = 0; i < channelAmount; i++)
-    if (_btns[i].isDouble())
-      setPower(i, 50);
-  
+    if (_btns[i].isDouble()) setPower(i, 50);
+
   // включение/выключение
   for (byte i = 0; i < btnsAmount; i++){
-    if (_btns[i].isSingle()){    
-      for (byte j = 0; j < channelAmount; j++){
-        _dimmers[j].toggle();
-        if (mqtt_cfg.useMQTT){
-          itoa(_dimmers[j].getOnOff(), st, DEC);
-          mqttClient.publish(_dimmers[j].mqtt_topic_state, st, true);
-        }
-      }
+    if (_btns[i].isSingle()) {
+      _btns[i].toggle();
+      if (mqttClient.connected()){
+        itoa(_btns[i].getOnOff(), st, DEC);
+        mqttClient.publish(_btns[i].mqtt_topic_state, st, true);
+      }    
+      //for (byte j = 0; j < channelAmount; j++){
+      if (!mqttClient.connected()) toggle(i);       // если не подключены к MQTT - переключаем канала по нажанию кнопок, а если подключены - то это делают автоматизации HA
+      //}
     }
   }
 
@@ -329,7 +430,7 @@ void triacPLC::_doButtonsDimmers(){
   for (byte i = 0; i < channelAmount; i++){
     if (_btns[i].isHold()){
       _dimmers[i].incPower();
-      if (mqtt_cfg.useMQTT){
+      if (mqttClient.connected()){
         itoa(_dimmers[i].getPower(), st, DEC);
         mqttClient.publish(_dimmers[i].mqtt_topic_bri_state, st, true);
       }
@@ -361,9 +462,18 @@ void triacPLC::display(){                                       // Эа функ
 }
 
 void triacPLC::showFreq(){
+  static char a1 = '/';
   plcOLED.setCursorXY(82, 56);
   plcOLED.print(ACfreq/10.0, 1); 
   plcOLED.print(" Hz");
+  plcOLED.setCursorXY(127, 0);
+  switch (a1) {
+    case '/' : a1 = '-'; break;
+    case '-' : a1 = '\\'; break;
+    case '\\' : a1 = '|'; break;
+    case '|' : a1 = '/'; break;
+  }
+  plcOLED.print(a1);
   display();
 }
 
@@ -395,7 +505,7 @@ void triacPLC::allOff(){
 void triacPLC::setOn(uint8_t channel){
   if (channel >= channelAmount) return;
   _dimmers[channel].setOn();
-  if (mqtt_cfg.useMQTT){
+  if (mqttClient.connected()){
     char st[4];        
     itoa(_dimmers[channel].getOnOff(), st, DEC);
     mqttClient.publish(_dimmers[channel].mqtt_topic_state, st, true);
@@ -405,7 +515,7 @@ void triacPLC::setOn(uint8_t channel){
 void triacPLC::setOff(uint8_t channel){
   if (channel>=channelAmount) return;
   _dimmers[channel].setOn();
-  if (mqtt_cfg.useMQTT){
+  if (mqttClient.connected()){
     char st[4];        
     itoa(_dimmers[channel].getOnOff(), st, DEC);
     mqttClient.publish(_dimmers[channel].mqtt_topic_state, st, true);
@@ -415,7 +525,8 @@ void triacPLC::setOff(uint8_t channel){
 void triacPLC::toggle(uint8_t channel){
   if (channel>=channelAmount) return;
   _dimmers[channel].toggle();
-  if (mqtt_cfg.useMQTT){
+  if (_dimmers[channel].getOnOff() && !mqttClient.connected() && mqtt_cfg.useMQTT && (_dimmers[channel].getPower() < 20)) _dimmers[channel].setPower (97); 
+  if (mqttClient.connected()){
     char st[4];        
     itoa(_dimmers[channel].getOnOff(), st, DEC);
     mqttClient.publish(_dimmers[channel].mqtt_topic_state, st, true);
@@ -425,7 +536,7 @@ void triacPLC::toggle(uint8_t channel){
 void triacPLC::setPower(uint8_t channel, uint8_t power){
   if (channel>=channelAmount) return; 
   _dimmers[channel].setPower(power);
-  if (mqtt_cfg.useMQTT){
+  if (mqttClient.connected()){
     char st[4];    
     itoa(_dimmers[channel].getPower(), st, DEC);
     mqttClient.publish(_dimmers[channel].mqtt_topic_bri_state, st, true);
@@ -458,6 +569,7 @@ void triacPLC::setDefMqttCfg(){
   strcpy(mqtt_cfg.Pass, def_mqtt_pass);
   strcpy(mqtt_cfg.ClientID, def_mqtt_clientID);
   strcpy(mqtt_cfg.HADiscover, def_HomeAssistantDiscovery);    // "HomeAssistant"
+  strcpy(mqtt_cfg.HABirthTopic, def_HABirthTopic);            // "homeassistant/status"
   uint8_t ip1[] = {def_mqtt_brokerIP}; memcpy(mqtt_cfg.SrvIP, ip1, sizeof(mqtt_cfg.SrvIP));
   mqtt_cfg.SrvPort = 1883;  
 }
@@ -473,6 +585,7 @@ void triacPLC::loadEEPROM(){
   } else {
      EEPROM.get(channelAmount*2+2, inet_cfg);
      EEPROM.get(channelAmount*2+2 + sizeof(inet_cfg), mqtt_cfg);
+     EEPROM.get(channelAmount*2+2 + sizeof(inet_cfg) + sizeof(mqtt_cfg), flipDisplay);
   }
 }
     
@@ -480,6 +593,7 @@ void triacPLC::saveEEPROM(){
   for (uint8_t i = 0; i < channelAmount; i++) _dimmers[i].saveEEPROM();
   EEPROM.put(channelAmount*2+2, inet_cfg);
   EEPROM.put(channelAmount*2+2 + sizeof(inet_cfg), mqtt_cfg);
+  EEPROM.put(channelAmount*2+2 + sizeof(inet_cfg) + sizeof(mqtt_cfg), flipDisplay);
 }
 
 uint8_t triacPLC::getRampTime(uint8_t channel){

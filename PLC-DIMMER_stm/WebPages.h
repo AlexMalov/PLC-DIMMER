@@ -149,7 +149,7 @@ P(css) =  ".r_tb {TEXT-ALIGN: right}"
           "TABLE.mytable {WIDTH: 838px; BACKGROUND-COLOR: white}"
           "TD.h_td {WIDTH: 138px}";
 
-#define NAMELEN 10
+#define NAMELEN 12
 #define VALUELEN 18
 
 void index_html(WebServer &server, WebServer::ConnectionType type, char *url_tail, bool tail_complete){
@@ -166,6 +166,11 @@ void index_html(WebServer &server, WebServer::ConnectionType type, char *url_tai
       rc = server.nextURLparam(&url_tail, name, NAMELEN, value, VALUELEN);
       if (rc != URLPARAM_EOS) {
         params_present = true;
+        if (strcmp(name, "flipDisplay") == 0) {
+          myPLC.flipDisplay = atoi(value);                               // read flipDisplay ON/OFF
+          myPLC.rtDisplay();                                             // вращаем дисплей если надо
+          
+        }
         if (strncmp(name, "Pow", 3) == 0) {
           byte idx = atoi(&name[3]) - 1;
           myPLC.setPower(idx, atoi(value));
@@ -174,12 +179,21 @@ void index_html(WebServer &server, WebServer::ConnectionType type, char *url_tai
         }
       }
     }
+    myPLC.saveEEPROM();
   }
 
   server.printP(Page_start);
   server.printP(top_menu);
   server.printP(Setup_begin);
   server.printP(index_Setup_begin);
+
+  server.print("<tr><td class='r_tb'>Rotate display: </td>");
+  server.print("<td class='l_tb'> <input type='radio' name='flipDisplay' value='0'");
+  if(!myPLC.flipDisplay) server.print(" checked ");
+  server.print(">Off <input type='radio' name='flipDisplay' value='1'");
+  if(myPLC.flipDisplay) server.print(" checked ");
+  server.print(">On </td></tr>");
+  server.print("<tr><td>&nbsp;</td></tr>");  
   server.print("<tr><td>Index</td><td>Output Power</td><td>Input state</td></tr>");
   for (uint8_t i = 0; i < channelAmount; i++){
     server.print("<tr><td>"); server.print(i+1); server.print("</td>");
@@ -315,6 +329,7 @@ void MQTT_html(WebServer &server, WebServer::ConnectionType type, char *url_tail
         if (strcmp(name, "mqttPass") == 0) strcpy( myPLC.mqtt_cfg.Pass, value);         // read mqttPass
         if (strcmp(name, "mqttCltID") == 0) strcpy( myPLC.mqtt_cfg.ClientID, value);         // read mqttClientID
         if (strcmp(name, "HADiscov") == 0) strcpy( myPLC.mqtt_cfg.HADiscover, value);                                                         // read "HomeAssistant" 
+        if (strcmp(name, "HABirth") == 0) strcpy( myPLC.mqtt_cfg.HABirthTopic, value);                                                         // read "homeassistant/status" 
         if (strcmp(name, "mqttSrvIP") == 0){
           if (ip1.fromString(value)) memcpy( myPLC.mqtt_cfg.SrvIP, &ip1[0], sizeof(myPLC.mqtt_cfg.SrvIP));                                   // read mqttSrvIP
           else {
@@ -355,6 +370,11 @@ void MQTT_html(WebServer &server, WebServer::ConnectionType type, char *url_tail
   server.print(myPLC.mqtt_cfg.HADiscover);
   server.print("'> </td> </tr>");
 
+  server.print("<tr><td class='r_tb'>HA Birth topic:</td>");                                                                          
+  server.printP(table_td_class_l_tb_start); server.print("HABirth' value='");        //    <td class='l_tb'><input maxlength='15' name='HADiscov' value='HomeAssistant  
+  server.print(myPLC.mqtt_cfg.HABirthTopic);
+  server.print("'> </td> </tr>");
+
   server.print("<tr><td class='r_tb'>MQTT Broker IP:</td>");
   server.printP(table_td_class_l_tb_start); server.print("mqttSrvIP' value='");       //    <td class='l_tb'><input maxlength='15' name='mqttSrvIP' value='192.168.0.124  
   for( uint8_t i = 0; i < sizeof(myPLC.mqtt_cfg.SrvIP); i++){
@@ -375,6 +395,9 @@ void MQTT_html(WebServer &server, WebServer::ConnectionType type, char *url_tail
   if(myPLC.mqtt_cfg.useMQTT) server.print(" checked ");
   server.print(">On </td> </tr>");
 
+  if (myPLC.mqtt_cfg.isHAonline) server.print("<tr><td class='r_tb'>HomeAssistant is</td><td class='l_tb'><b>online</b></td></tr>");
+    else server.print("<tr><td class='r_tb'>HomeAssistant is</td><td class='l_tb'><b>offline</b></td></tr>");
+  
   server.printP(lan_Setup_end);
   server.printP(Page_end);
 }
